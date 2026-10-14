@@ -47,12 +47,14 @@ jobs:
         #include <windows.h>
         #undef min
         #undef max
-        inline int UwpMessageBoxW(void*, const wchar_t* lpText, const wchar_t* lpCaption, unsigned int) {
+        static inline int UwpMessageBoxW(void* hWnd, const wchar_t* lpText, const wchar_t* lpCaption, unsigned int uType) {
+            (void)hWnd; (void)uType;
             if (lpCaption) OutputDebugStringW(lpCaption);
             if (lpText) OutputDebugStringW(lpText);
             return 1;
         }
-        inline int UwpMessageBoxA(void*, const char* lpText, const char* lpCaption, unsigned int) {
+        static inline int UwpMessageBoxA(void* hWnd, const char* lpText, const char* lpCaption, unsigned int uType) {
+            (void)hWnd; (void)uType;
             if (lpCaption) OutputDebugStringA(lpCaption);
             if (lpText) OutputDebugStringA(lpText);
             return 1;
