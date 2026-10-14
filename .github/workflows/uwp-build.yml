@@ -17,6 +17,14 @@ jobs:
     - name: 2. Configurar MSBuild e Visual Studio C++20
       uses: microsoft/setup-msbuild@v2
 
+    - name: 2.5. Gerar arquivos automaticos (.hpp) no modo Desktop (Host)
+      shell: cmd
+      run: |
+        mkdir build_host
+        cd build_host
+        cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_CXX_STANDARD=20
+        cmake --build . --config Release --target GENERATE_PARSERS GENERATE_CONTAINER GENERATE_CONTAINER_LUA GENERATE_CONTAINER_OOS GENERATE_CONTAINERINTERFACE -- /m
+
     - name: 3. Gerar projeto UWP via CMake
       shell: cmd
       run: |
@@ -24,7 +32,7 @@ jobs:
         cd build_uwp
         cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_SYSTEM_NAME="WindowsStore" -DCMAKE_SYSTEM_VERSION="10.0" -DCMAKE_CXX_STANDARD=20
 
-    - name: 3.5. Forcar Runtime Dinamico (MultiThreadedDLL) nos arquivos .vcxproj
+    - name: 3.5. Ajustar .vcxproj para Runtime Dinamico e pular geradores ja prontos
       shell: pwsh
       run: |
         Get-ChildItem -Path build_uwp -Filter *.vcxproj -Recurse | ForEach-Object {
@@ -34,7 +42,7 @@ jobs:
           Set-Content -Path $_.FullName -Value $content
         }
 
-    - name: 4. Compilar o executavel UWP (Alice)
+    - name: 4. Compilar apenas o executavel UWP (Alice) sem re-rodar geradores
       shell: cmd
       run: |
-        cmake --build build_uwp --config Release --target Alice -- /m
+        msbuild build_uwp/Alice.vcxproj /p:Configuration=Release /p:Platform=x64 /p:BuildProjectReferences=false /m
