@@ -1,0 +1,28 @@
+name: Build Project Alice UWP (Xbox)
+
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  build-uwp:
+    runs-on: windows-2022
+
+    steps:
+    - name: 1. Baixar o codigo e submodulos (dependencias)
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: 2. Configurar MSBuild e Visual Studio C++20
+      uses: microsoft/setup-msbuild@v2
+
+    - name: 3. Gerar projeto UWP via CMake
+      run: |
+        mkdir build_uwp
+        cd build_uwp
+        cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_SYSTEM_NAME=WindowsStore -DCMAKE_SYSTEM_VERSION=10.0 -DCMAKE_CXX_STANDARD=20
+
+    - name: 4. Compilar o executavel UWP (Alice)
+      run: |
+        cmake --build build_uwp --config Release --target Alice -- /m
