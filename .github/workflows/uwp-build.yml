@@ -17,32 +17,35 @@ jobs:
     - name: 2. Configurar MSBuild e Visual Studio C++20
       uses: microsoft/setup-msbuild@v2
 
-    - name: 2.5. Gerar arquivos automaticos (.hpp) no modo Desktop (Host)
-      shell: cmd
-      run: |
-        mkdir build_host
-        cd build_host
-        cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_CXX_STANDARD=20
-        cmake --build . --config Release --target GENERATE_PARSERS GENERATE_CONTAINER GENERATE_CONTAINER_LUA GENERATE_CONTAINER_OOS GENERATE_CONTAINERINTERFACE -- /m
-
-    - name: 3. Gerar projeto UWP via CMake
+    - name: 3. Gerar projeto UWP via CMake (Unico)
       shell: cmd
       run: |
         mkdir build_uwp
         cd build_uwp
         cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_SYSTEM_NAME="WindowsStore" -DCMAKE_SYSTEM_VERSION="10.0" -DCMAKE_CXX_STANDARD=20
 
-    - name: 3.5. Ajustar .vcxproj para Runtime Dinamico e pular geradores ja prontos
+    - name: 3.5. Configurar Geradores como Desktop (.exe) e Alice como UWP (.msix)
       shell: pwsh
       run: |
+        # 1. Ajusta Runtime Dinamico (MultiThreadedDLL) em todos os projetos
         Get-ChildItem -Path build_uwp -Filter *.vcxproj -Recurse | ForEach-Object {
           $content = Get-Content $_.FullName -Raw
           $content = $content -replace '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>'
           $content = $content -replace '<RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>'
+
+          # 2. Se for um gerador de codigo auxiliar, transforma em .exe Desktop normal para poder rodar no servidor!
+          if ($_.Name -match 'ParserGenerator|DCONGENERATOR|DataContainer|FifInterfaceGenerator') {
+            Write-Host "Transformando gerador em Desktop .exe: $($_.Name)"
+            $content = $content -replace '<AppContainerApplication>true</AppContainerApplication>', '<AppContainerApplication>false</AppContainerApplication>'
+            $content = $content -replace '<ApplicationType>Windows Store</ApplicationType>', ''
+            $content = $content -replace '<ApplicationTypeRevision>10.0</ApplicationTypeRevision>', ''
+            $content = $content -replace '<WindowsTargetPlatformMinVersion>.*?</WindowsTargetPlatformMinVersion>', ''
+          }
+
           Set-Content -Path $_.FullName -Value $content
         }
 
-    - name: 4. Compilar apenas o executavel UWP (Alice) sem re-rodar geradores
+    - name: 4. Compilar o executavel UWP (Alice)
       shell: cmd
       run: |
-        msbuild build_uwp/Alice.vcxproj /p:Configuration=Release /p:Platform=x64 /p:BuildProjectReferences=false /m
+        cmake --build build_uwp --config Release --target Alice -- /m
