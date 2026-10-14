@@ -17,12 +17,21 @@ jobs:
     - name: 2. Configurar MSBuild e Visual Studio C++20
       uses: microsoft/setup-msbuild@v2
 
+    - name: 2.5. Ajustar CMakeLists.txt para Runtime Dinamico UWP (/MD)
+      shell: pwsh
+      run: |
+        (Get-Content CMakeLists.txt) `
+          -replace 'MultiThreadedDebug', 'MultiThreadedDebugDLL' `
+          -replace '"MultiThreaded"', '"MultiThreadedDLL"' `
+          -replace '\b/MTd\b', '/MDd' `
+          -replace '\b/MT\b', '/MD' | Set-Content CMakeLists.txt
+
     - name: 3. Gerar projeto UWP via CMake
       shell: cmd
       run: |
         mkdir build_uwp
         cd build_uwp
-        cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_SYSTEM_NAME="WindowsStore" -DCMAKE_SYSTEM_VERSION="10.0" -DCMAKE_CXX_STANDARD=20
+        cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_SYSTEM_NAME="WindowsStore" -DCMAKE_SYSTEM_VERSION="10.0" -DCMAKE_CXX_STANDARD=20 -DCMAKE_MSVC_RUNTIME_LIBRARY="MultiThreadedDLL"
 
     - name: 4. Compilar o executavel UWP (Alice)
       shell: cmd
