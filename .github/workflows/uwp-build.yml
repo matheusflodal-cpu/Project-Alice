@@ -25,78 +25,74 @@ jobs:
         cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_SYSTEM_NAME="WindowsStore" -DCMAKE_SYSTEM_VERSION="10.0" -DCMAKE_CXX_STANDARD=20
 
     - name: 3.5. Injetar camada de compatibilidade UWP e ajustar .vcxproj
-      shell: pwsh
+      shell: python
       run: |
-        $root = (Get-Location).Path
-        $compatPath = Join-Path$root "build_uwp\uwp_compat.hpp"
+        import os, glob, re
 
-        $lines = @(
-          "#pragma once",
-          "#ifndef UWP_COMPAT_HPP",
-          "#define UWP_COMPAT_HPP",
-          "#include <winapifamily.h>",
-          "#undef WINAPI_FAMILY",
-          "#define WINAPI_FAMILY WINAPI_FAMILY_DESKTOP_APP",
-          "#include <windows.h>",
-          "inline int UwpMessageBoxW(HWND, LPCWSTR lpText, LPCWSTR lpCaption, UINT) {",
-          "    if (lpCaption) OutputDebugStringW(lpCaption);",
-          "    if (lpText) OutputDebugStringW(lpText);",
-          "    return IDOK;",
-          "}",
-          "inline int UwpMessageBoxA(HWND, LPCSTR lpText, LPCSTR lpCaption, UINT) {",
-          "    if (lpCaption) OutputDebugStringA(lpCaption);",
-          "    if (lpText) OutputDebugStringA(lpText);",
-          "    return IDOK;",
-          "}",
-          "#undef MessageBoxW",
-          "#undef MessageBoxA",
-          "#define MessageBoxW UwpMessageBoxW",
-          "#define MessageBoxA UwpMessageBoxA",
-          "#endif"
-        )
-        Set-Content -Path $compatPath -Value$lines -Encoding UTF8
+        root = os.getcwd()
+        compat_path = os.path.join(root, "build_uwp", "uwp_compat.hpp")
 
-        $files = Get-ChildItem -Path "build_uwp" -Filter "*.vcxproj" -Recurse
-        foreach ($file in$files) {
-          $content = [System.IO.File]::ReadAllText($file.FullName)
-          $content =$content.Replace('<RuntimeLibrary>MultiThreaded</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>')
-          $content =$content.Replace('<RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>')
-
-          if ($file.Name -match 'libglew|Alice') {
-            $content =$content.Replace('<WindowsAppContainer>true</WindowsAppContainer>', '<WindowsAppContainer>false</WindowsAppContainer>')
-          }
-
-          if ($file.Name -eq 'Alice.vcxproj') {
-            $content =$content.Replace('<AdditionalOptions>', "<AdditionalOptions>/FI`"$compatPath`" ")
-          }
-
-          if ($file.Name -match 'ParserGenerator|DCONGENERATOR|DCONINTERFACEGEN|DataContainer') {
-            $content =$content.Replace('<AppContainerApplication>true</AppContainerApplication>', '<AppContainerApplication>false</AppContainerApplication>')
-            $content =$content.Replace('<WindowsAppContainer>true</WindowsAppContainer>', '<WindowsAppContainer>false</WindowsAppContainer>')
-            $content =$content.Replace('<ApplicationType>Windows Store</ApplicationType>', '')
-            $content =$content.Replace('<ApplicationTypeRevision>10.0</ApplicationTypeRevision>', '')
-            $content =$content -replace '<WindowsTargetPlatformMinVersion>.*?</WindowsTargetPlatformMinVersion>', ''
-            $content =$content.Replace('windowsapp.lib;', 'kernel32.lib;user32.lib;')
-          }
-
-          [System.IO.File]::WriteAllText($file.FullName, $content)
+        compat_code = """#pragma once
+        #ifndef UWP_COMPAT_HPP
+        #define UWP_COMPAT_HPP
+        #include <winapifamily.h>
+        #undef WINAPI_FAMILY
+        #define WINAPI_FAMILY WINAPI_FAMILY_DESKTOP_APP
+        #include <windows.h>
+        inline int UwpMessageBoxW(HWND, LPCWSTR lpText, LPCWSTR lpCaption, UINT) {
+            if (lpCaption) OutputDebugStringW(lpCaption);
+            if (lpText) OutputDebugStringW(lpText);
+            return IDOK;
         }
+        inline int UwpMessageBoxA(HWND, LPCSTR lpText, LPCSTR lpCaption, UINT) {
+            if (lpCaption) OutputDebugStringA(lpCaption);
+            if (lpText) OutputDebugStringA(lpText);
+            return IDOK;
+        }
+        #undef MessageBoxW
+        #undef MessageBoxA
+        #define MessageBoxW UwpMessageBoxW
+        #define MessageBoxA UwpMessageBoxA
+        #endif
+        """
+
+        with open(compat_path, "w", encoding="utf-8") as f:
+            f.write(compat_code)
+
+        generators = ("ParserGenerator", "DCONGENERATOR", "DCONINTERFACEGEN", "DataContainer")
+
+        for filepath in glob.glob("build_uwp/**/*.vcxproj", recursive=True):
+            filename = os.path.basename(filepath)
+            with open(filepath, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            content = content.replace("<RuntimeLibrary>MultiThreaded</RuntimeLibrary>", "<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>")
+            content = content.replace("<RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>", "<RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>")
+
+            if "libglew" in filename or "Alice" in filename:
+                content = content.replace("<WindowsAppContainer>true</WindowsAppContainer>", "<WindowsAppContainer>false</WindowsAppContainer>")
+
+            if filename == "Alice.vcxproj":
+                content = content.replace("<AdditionalOptions>", f'<AdditionalOptions>/FI"{compat_path}" ')
+
+            if any(g in filename for g in generators):
+                content = content.replace("<AppContainerApplication>true</AppContainerApplication>", "<AppContainerApplication>false</AppContainerApplication>")
+                content = content.replace("<WindowsAppContainer>true</WindowsAppContainer>", "<WindowsAppContainer>false</WindowsAppContainer>")
+                content = content.replace("<ApplicationType>Windows Store</ApplicationType>", "")
+                content = content.replace("<ApplicationTypeRevision>10.0</ApplicationTypeRevision>", "")
+                content = re.sub(r"<WindowsTargetPlatformMinVersion>.*?</WindowsTargetPlatformMinVersion>", "", content)
+                content = content.replace("windowsapp.lib;", "kernel32.lib;user32.lib;")
+
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(content)
 
     - name: 4. Compilar os Geradores e depois o Alice UWP (Mostrando apenas Erros)
-      shell: pwsh
+      shell: cmd
       run: |
-        $root = (Get-Location).Path
         msbuild build_uwp/ParserGenerator/ParserGenerator.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
         msbuild build_uwp/dependencies/DataContainerGenerator/DCONGENERATOR.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
         msbuild build_uwp/FifInterfaceGenerator/DCONINTERFACEGEN.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
         msbuild build_uwp/_deps/datacontainerlua-build/DataContainer-Lua.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
         msbuild build_uwp/_deps/datacontaineroosreporter-build/DataContainer_OOS_Reporter/DataContainer_OOS_Reporter.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
-
-        $env:PATH = "$root\build_uwp\ParserGenerator\Release;" +
-                    "$root\build_uwp\dependencies\DataContainerGenerator\Release;" +
-                    "$root\build_uwp\FifInterfaceGenerator\Release;" +
-                    "$root\build_uwp\_deps\datacontainerlua-build\Release;" +
-                    "$root\build_uwp\_deps\datacontaineroosreporter-build\DataContainer_OOS_Reporter\Release;" +
-                    $env:PATH
-
+        set "PATH=%CD%\build_uwp\ParserGenerator\Release;%CD%\build_uwp\dependencies\DataContainerGenerator\Release;%CD%\build_uwp\FifInterfaceGenerator\Release;%CD%\build_uwp\_deps\datacontainerlua-build\Release;%CD%\build_uwp\_deps\datacontaineroosreporter-build\DataContainer_OOS_Reporter\Release;%PATH%"
         cmake --build build_uwp --config Release --target Alice -- /m /clp:ErrorsOnly
