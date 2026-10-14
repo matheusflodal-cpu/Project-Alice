@@ -24,40 +24,75 @@ jobs:
         cd build_uwp
         cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_SYSTEM_NAME="WindowsStore" -DCMAKE_SYSTEM_VERSION="10.0" -DCMAKE_CXX_STANDARD=20
 
-    - name: 3.5. Configurar Geradores como Desktop (.exe) e Alice como UWP (.msix)
-      shell: pwsh
-      run: |
-        Get-ChildItem -Path build_uwp -Filter *.vcxproj -Recurse | ForEach-Object {
-          $content = Get-Content $_.FullName -Raw
-          $content = $content -replace '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>'
-          $content = $content -replace '<RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>'
-
-          # Transforma TODOS os 5 geradores em .exe Desktop normal (sem WindowsAppContainer)
-          if ($_.Name -match 'ParserGenerator|DCONGENERATOR|DCONINTERFACEGEN|DataContainer') {
-            Write-Host "Transformando gerador em Desktop .exe: $($_.Name)"
-            $content = $content -replace '<AppContainerApplication>true</AppContainerApplication>', '<AppContainerApplication>false</AppContainerApplication>'
-            $content = $content -replace '<WindowsAppContainer>true</WindowsAppContainer>', '<WindowsAppContainer>false</WindowsAppContainer>'
-            $content = $content -replace '<ApplicationType>Windows Store</ApplicationType>', ''
-            $content = $content -replace '<ApplicationTypeRevision>10.0</ApplicationTypeRevision>', ''
-            $content = $content -replace '<WindowsTargetPlatformMinVersion>.*?</WindowsTargetPlatformMinVersion>', ''
-            $content = $content -replace 'windowsapp\.lib;', 'kernel32.lib;user32.lib;'
-          }
-
-          Set-Content -Path $_.FullName -Value $content
-        }
-
-    - name: 4. Compilar os Geradores e depois o Alice UWP
+    - name: 3.5. Injetar camada de compatibilidade UWP e ajustar .vcxproj
       shell: pwsh
       run: |
         $root = (Get-Location).Path
-        # 1. Compila os 5 geradores primeiro
-        msbuild build_uwp/ParserGenerator/ParserGenerator.vcxproj /p:Configuration=Release /p:Platform=x64 /m
-        msbuild build_uwp/dependencies/DataContainerGenerator/DCONGENERATOR.vcxproj /p:Configuration=Release /p:Platform=x64 /m
-        msbuild build_uwp/FifInterfaceGenerator/DCONINTERFACEGEN.vcxproj /p:Configuration=Release /p:Platform=x64 /m
-        msbuild build_uwp/_deps/datacontainerlua-build/DataContainer-Lua.vcxproj /p:Configuration=Release /p:Platform=x64 /m
-        msbuild build_uwp/_deps/datacontaineroosreporter-build/DataContainer_OOS_Reporter/DataContainer_OOS_Reporter.vcxproj /p:Configuration=Release /p:Platform=x64 /m
 
-        # 2. Adiciona as pastas onde os .exe nasceram ao PATH do Windows!
+        # 1. Cria um cabecalho de compatibilidade UWP (traduz MessageBoxA/W e destrava headers Win32)
+        $compatHeader = @"
+        #pragma once
+        #ifndef UWP_COMPAT_HPP
+        #define UWP_COMPAT_HPP
+        #include <winapifamily.h>
+        #undef WINAPI_FAMILY
+        #define WINAPI_FAMILY WINAPI_FAMILY_DESKTOP_APP
+        #include <windows.h>
+        inline int UwpMessageBoxW(HWND, LPCWSTR lpText, LPCWSTR lpCaption, UINT) {
+            if (lpCaption) OutputDebugStringW(lpCaption);
+            if (lpText) OutputDebugStringW(lpText);
+            return IDOK;
+        }
+        inline int UwpMessageBoxA(HWND, LPCSTR lpText, LPCSTR lpCaption, UINT) {
+            if (lpCaption) OutputDebugStringA(lpCaption);
+            if (lpText) OutputDebugStringA(lpText);
+            return IDOK;
+        }
+        #undef MessageBoxW
+        #undef MessageBoxA
+        #define MessageBoxW UwpMessageBoxW
+        #define MessageBoxA UwpMessageBoxA
+        #endif
+        "@
+        Set-Content -Path "$root\build_uwp\uwp_compat.hpp" -Value $compatHeader -Encoding UTF8
+
+        # 2. Ajusta os arquivos .vcxproj
+        Get-ChildItem -Path build_uwp -Filter *.vcxproj -Recurse | ForEach-Object {
+          $content = Get-Content$_.FullName -Raw
+          $content =$content -replace '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>'
+          $content =$content -replace '<RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>'
+
+          # Destrava compilacao das bibliotecas estaticas (glew) e injeta o uwp_compat.hpp no Alice
+          if ($_.Name -match 'libglew|Alice') {
+            $content =$content -replace '<WindowsAppContainer>true</WindowsAppContainer>', '<WindowsAppContainer>false</WindowsAppContainer>'
+          }
+          if ($_.Name -eq 'Alice.vcxproj') {
+            $content =$content -replace '<AdditionalOptions>', "<AdditionalOptions>/FI`"$root\build_uwp\uwp_compat.hpp`" "
+          }
+
+          # Transforma TODOS os 5 geradores em .exe Desktop normal
+          if ($_.Name -match 'ParserGenerator|DCONGENERATOR|DCONINTERFACEGEN|DataContainer') {
+            $content =$content -replace '<AppContainerApplication>true</AppContainerApplication>', '<AppContainerApplication>false</AppContainerApplication>'
+            $content =$content -replace '<WindowsAppContainer>true</WindowsAppContainer>', '<WindowsAppContainer>false</WindowsAppContainer>'
+            $content =$content -replace '<ApplicationType>Windows Store</ApplicationType>', ''
+            $content =$content -replace '<ApplicationTypeRevision>10.0</ApplicationTypeRevision>', ''
+            $content =$content -replace '<WindowsTargetPlatformMinVersion>.*?</WindowsTargetPlatformMinVersion>', ''
+            $content =$content -replace 'windowsapp\.lib;', 'kernel32.lib;user32.lib;'
+          }
+
+          Set-Content -Path $_.FullName -Value$content
+        }
+
+    - name: 4. Compilar os Geradores e depois o Alice UWP (Mostrando apenas Erros)
+      shell: pwsh
+      run: |
+        $root = (Get-Location).Path
+        msbuild build_uwp/ParserGenerator/ParserGenerator.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
+        msbuild build_uwp/dependencies/DataContainerGenerator/DCONGENERATOR.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
+        msbuild build_uwp/FifInterfaceGenerator/DCONINTERFACEGEN.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
+        msbuild build_uwp/_deps/datacontainerlua-build/DataContainer-Lua.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
+        msbuild build_uwp/_deps/datacontaineroosreporter-build/DataContainer_OOS_Reporter/DataContainer_OOS_Reporter.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
+
         $env:PATH = "$root\build_uwp\ParserGenerator\Release;" +
                     "$root\build_uwp\dependencies\DataContainerGenerator\Release;" +
                     "$root\build_uwp\FifInterfaceGenerator\Release;" +
@@ -65,5 +100,4 @@ jobs:
                     "$root\build_uwp\_deps\datacontaineroosreporter-build\DataContainer_OOS_Reporter\Release;" +
                     $env:PATH
 
-        # 3. Agora compila o Alice UWP (ele vai achar todos os geradores no PATH!)
-        cmake --build build_uwp --config Release --target Alice -- /m
+        msbuild build_uwp/Alice.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
