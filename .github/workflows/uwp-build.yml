@@ -27,25 +27,43 @@ jobs:
     - name: 3.5. Configurar Geradores como Desktop (.exe) e Alice como UWP (.msix)
       shell: pwsh
       run: |
-        # 1. Ajusta Runtime Dinamico (MultiThreadedDLL) em todos os projetos
         Get-ChildItem -Path build_uwp -Filter *.vcxproj -Recurse | ForEach-Object {
           $content = Get-Content $_.FullName -Raw
           $content = $content -replace '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>'
           $content = $content -replace '<RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>'
 
-          # 2. Se for um gerador de codigo auxiliar, transforma em .exe Desktop normal para poder rodar no servidor!
-          if ($_.Name -match 'ParserGenerator|DCONGENERATOR|DataContainer|FifInterfaceGenerator') {
+          # Transforma TODOS os 5 geradores em .exe Desktop normal (sem WindowsAppContainer)
+          if ($_.Name -match 'ParserGenerator|DCONGENERATOR|DCONINTERFACEGEN|DataContainer') {
             Write-Host "Transformando gerador em Desktop .exe: $($_.Name)"
             $content = $content -replace '<AppContainerApplication>true</AppContainerApplication>', '<AppContainerApplication>false</AppContainerApplication>'
+            $content = $content -replace '<WindowsAppContainer>true</WindowsAppContainer>', '<WindowsAppContainer>false</WindowsAppContainer>'
             $content = $content -replace '<ApplicationType>Windows Store</ApplicationType>', ''
             $content = $content -replace '<ApplicationTypeRevision>10.0</ApplicationTypeRevision>', ''
             $content = $content -replace '<WindowsTargetPlatformMinVersion>.*?</WindowsTargetPlatformMinVersion>', ''
+            $content = $content -replace 'windowsapp\.lib;', 'kernel32.lib;user32.lib;'
           }
 
           Set-Content -Path $_.FullName -Value $content
         }
 
-    - name: 4. Compilar o executavel UWP (Alice)
-      shell: cmd
+    - name: 4. Compilar os Geradores e depois o Alice UWP
+      shell: pwsh
       run: |
+        $root = (Get-Location).Path
+        # 1. Compila os 5 geradores primeiro
+        msbuild build_uwp/ParserGenerator/ParserGenerator.vcxproj /p:Configuration=Release /p:Platform=x64 /m
+        msbuild build_uwp/dependencies/DataContainerGenerator/DCONGENERATOR.vcxproj /p:Configuration=Release /p:Platform=x64 /m
+        msbuild build_uwp/FifInterfaceGenerator/DCONINTERFACEGEN.vcxproj /p:Configuration=Release /p:Platform=x64 /m
+        msbuild build_uwp/_deps/datacontainerlua-build/DataContainer-Lua.vcxproj /p:Configuration=Release /p:Platform=x64 /m
+        msbuild build_uwp/_deps/datacontaineroosreporter-build/DataContainer_OOS_Reporter/DataContainer_OOS_Reporter.vcxproj /p:Configuration=Release /p:Platform=x64 /m
+
+        # 2. Adiciona as pastas onde os .exe nasceram ao PATH do Windows!
+        $env:PATH = "$root\build_uwp\ParserGenerator\Release;" +
+                    "$root\build_uwp\dependencies\DataContainerGenerator\Release;" +
+                    "$root\build_uwp\FifInterfaceGenerator\Release;" +
+                    "$root\build_uwp\_deps\datacontainerlua-build\Release;" +
+                    "$root\build_uwp\_deps\datacontaineroosreporter-build\DataContainer_OOS_Reporter\Release;" +
+                    $env:PATH
+
+        # 3. Agora compila o Alice UWP (ele vai achar todos os geradores no PATH!)
         cmake --build build_uwp --config Release --target Alice -- /m
