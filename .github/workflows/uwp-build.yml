@@ -28,59 +28,58 @@ jobs:
       shell: pwsh
       run: |
         $root = (Get-Location).Path
+        $compatPath = Join-Path$root "build_uwp\uwp_compat.hpp"
 
-        # 1. Cria um cabecalho de compatibilidade UWP (traduz MessageBoxA/W e destrava headers Win32)
-        $compatHeader = @"
-        #pragma once
-        #ifndef UWP_COMPAT_HPP
-        #define UWP_COMPAT_HPP
-        #include <winapifamily.h>
-        #undef WINAPI_FAMILY
-        #define WINAPI_FAMILY WINAPI_FAMILY_DESKTOP_APP
-        #include <windows.h>
-        inline int UwpMessageBoxW(HWND, LPCWSTR lpText, LPCWSTR lpCaption, UINT) {
-            if (lpCaption) OutputDebugStringW(lpCaption);
-            if (lpText) OutputDebugStringW(lpText);
-            return IDOK;
-        }
-        inline int UwpMessageBoxA(HWND, LPCSTR lpText, LPCSTR lpCaption, UINT) {
-            if (lpCaption) OutputDebugStringA(lpCaption);
-            if (lpText) OutputDebugStringA(lpText);
-            return IDOK;
-        }
-        #undef MessageBoxW
-        #undef MessageBoxA
-        #define MessageBoxW UwpMessageBoxW
-        #define MessageBoxA UwpMessageBoxA
-        #endif
-        "@
-        Set-Content -Path "$root\build_uwp\uwp_compat.hpp" -Value $compatHeader -Encoding UTF8
+        $lines = @(
+          "#pragma once",
+          "#ifndef UWP_COMPAT_HPP",
+          "#define UWP_COMPAT_HPP",
+          "#include <winapifamily.h>",
+          "#undef WINAPI_FAMILY",
+          "#define WINAPI_FAMILY WINAPI_FAMILY_DESKTOP_APP",
+          "#include <windows.h>",
+          "inline int UwpMessageBoxW(HWND, LPCWSTR lpText, LPCWSTR lpCaption, UINT) {",
+          "    if (lpCaption) OutputDebugStringW(lpCaption);",
+          "    if (lpText) OutputDebugStringW(lpText);",
+          "    return IDOK;",
+          "}",
+          "inline int UwpMessageBoxA(HWND, LPCSTR lpText, LPCSTR lpCaption, UINT) {",
+          "    if (lpCaption) OutputDebugStringA(lpCaption);",
+          "    if (lpText) OutputDebugStringA(lpText);",
+          "    return IDOK;",
+          "}",
+          "#undef MessageBoxW",
+          "#undef MessageBoxA",
+          "#define MessageBoxW UwpMessageBoxW",
+          "#define MessageBoxA UwpMessageBoxA",
+          "#endif"
+        )
+        Set-Content -Path $compatPath -Value$lines -Encoding UTF8
 
-        # 2. Ajusta os arquivos .vcxproj
-        Get-ChildItem -Path build_uwp -Filter *.vcxproj -Recurse | ForEach-Object {
-          $content = Get-Content$_.FullName -Raw
-          $content =$content -replace '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>'
-          $content =$content -replace '<RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>'
+        $files = Get-ChildItem -Path "build_uwp" -Filter "*.vcxproj" -Recurse
+        foreach ($file in$files) {
+          $content = [System.IO.File]::ReadAllText($file.FullName)
+          $content =$content.Replace('<RuntimeLibrary>MultiThreaded</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>')
+          $content =$content.Replace('<RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>')
 
-          # Destrava compilacao das bibliotecas estaticas (glew) e injeta o uwp_compat.hpp no Alice
-          if ($_.Name -match 'libglew|Alice') {
-            $content =$content -replace '<WindowsAppContainer>true</WindowsAppContainer>', '<WindowsAppContainer>false</WindowsAppContainer>'
-          }
-          if ($_.Name -eq 'Alice.vcxproj') {
-            $content =$content -replace '<AdditionalOptions>', "<AdditionalOptions>/FI`"$root\build_uwp\uwp_compat.hpp`" "
+          if ($file.Name -match 'libglew|Alice') {
+            $content =$content.Replace('<WindowsAppContainer>true</WindowsAppContainer>', '<WindowsAppContainer>false</WindowsAppContainer>')
           }
 
-          # Transforma TODOS os 5 geradores em .exe Desktop normal
-          if ($_.Name -match 'ParserGenerator|DCONGENERATOR|DCONINTERFACEGEN|DataContainer') {
-            $content =$content -replace '<AppContainerApplication>true</AppContainerApplication>', '<AppContainerApplication>false</AppContainerApplication>'
-            $content =$content -replace '<WindowsAppContainer>true</WindowsAppContainer>', '<WindowsAppContainer>false</WindowsAppContainer>'
-            $content =$content -replace '<ApplicationType>Windows Store</ApplicationType>', ''
-            $content =$content -replace '<ApplicationTypeRevision>10.0</ApplicationTypeRevision>', ''
+          if ($file.Name -eq 'Alice.vcxproj') {
+            $content =$content.Replace('<AdditionalOptions>', "<AdditionalOptions>/FI`"$compatPath`" ")
+          }
+
+          if ($file.Name -match 'ParserGenerator|DCONGENERATOR|DCONINTERFACEGEN|DataContainer') {
+            $content =$content.Replace('<AppContainerApplication>true</AppContainerApplication>', '<AppContainerApplication>false</AppContainerApplication>')
+            $content =$content.Replace('<WindowsAppContainer>true</WindowsAppContainer>', '<WindowsAppContainer>false</WindowsAppContainer>')
+            $content =$content.Replace('<ApplicationType>Windows Store</ApplicationType>', '')
+            $content =$content.Replace('<ApplicationTypeRevision>10.0</ApplicationTypeRevision>', '')
             $content =$content -replace '<WindowsTargetPlatformMinVersion>.*?</WindowsTargetPlatformMinVersion>', ''
-            $content =$content -replace 'windowsapp\.lib;', 'kernel32.lib;user32.lib;'
+            $content =$content.Replace('windowsapp.lib;', 'kernel32.lib;user32.lib;')
           }
 
-          Set-Content -Path $_.FullName -Value$content
+          [System.IO.File]::WriteAllText($file.FullName, $content)
         }
 
     - name: 4. Compilar os Geradores e depois o Alice UWP (Mostrando apenas Erros)
@@ -100,4 +99,4 @@ jobs:
                     "$root\build_uwp\_deps\datacontaineroosreporter-build\DataContainer_OOS_Reporter\Release;" +
                     $env:PATH
 
-        msbuild build_uwp/Alice.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
+        cmake --build build_uwp --config Release --target Alice -- /m /clp:ErrorsOnly
