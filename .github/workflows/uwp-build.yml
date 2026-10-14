@@ -18,11 +18,13 @@ jobs:
       uses: microsoft/setup-msbuild@v2
 
     - name: 3. Gerar projeto UWP via CMake
+      shell: cmd
       run: |
         mkdir build_uwp
         cd build_uwp
-        cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_SYSTEM_NAME=WindowsStore -DCMAKE_SYSTEM_VERSION=10.0 -DCMAKE_CXX_STANDARD=20
+        cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_SYSTEM_NAME="WindowsStore" -DCMAKE_SYSTEM_VERSION="10.0" -DCMAKE_CXX_STANDARD=20
 
     - name: 4. Compilar o executavel UWP (Alice)
+      shell: cmd
       run: |
         cmake --build build_uwp --config Release --target Alice -- /m
