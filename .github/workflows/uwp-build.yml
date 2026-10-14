@@ -35,16 +35,18 @@ jobs:
         compat_code = """#pragma once
         #ifndef UWP_COMPAT_HPP
         #define UWP_COMPAT_HPP
-        #include <winapifamily.h>
-        #undef WINAPI_FAMILY
-        #define WINAPI_FAMILY WINAPI_FAMILY_DESKTOP_APP
+        #ifndef NOMINMAX
+        #define NOMINMAX
+        #endif
         #ifndef WIN32_LEAN_AND_MEAN
         #define WIN32_LEAN_AND_MEAN
         #endif
+        #include <winapifamily.h>
+        #undef WINAPI_FAMILY
+        #define WINAPI_FAMILY WINAPI_FAMILY_DESKTOP_APP
         #include <windows.h>
-        #ifndef IDOK
-        #define IDOK 1
-        #endif
+        #undef min
+        #undef max
         inline int UwpMessageBoxW(void*, const wchar_t* lpText, const wchar_t* lpCaption, unsigned int) {
             if (lpCaption) OutputDebugStringW(lpCaption);
             if (lpText) OutputDebugStringW(lpText);
@@ -67,7 +69,6 @@ jobs:
         with open(compat_path, "w", encoding="utf-8") as f:
             f.write(compat_code)
 
-        # Injeta direto nos cabecalhos pre-compilados (cmake_pch.hxx) e no common_types.hpp
         for target_file in glob.glob("build_uwp/**/cmake_pch.hxx", recursive=True) + glob.glob("build_uwp/**/common_types.hpp", recursive=True):
             with open(target_file, "r", encoding="utf-8") as f:
                 tc = f.read()
