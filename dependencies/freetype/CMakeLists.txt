@@ -17,6 +17,10 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(freetype)
 
 set_target_properties(freetype PROPERTIES UNITY_BUILD false)
+if(CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+	# Select FreeType's own CreateFile2/MapViewOfFileFromApp implementation.
+	target_compile_definitions(freetype PRIVATE _WINRT_DLL)
+endif()
 
 if(WIN32)
 	set(CMAKE_CXX_FLAGS "")

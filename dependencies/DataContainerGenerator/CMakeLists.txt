@@ -11,7 +11,22 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(DataContainer)
 
 add_library(dependency_DataContainer INTERFACE)
-target_include_directories(dependency_DataContainer SYSTEM INTERFACE "${datacontainer_SOURCE_DIR}/CommonIncludes/")
+set(DCON_INCLUDE_DIR "${datacontainer_SOURCE_DIR}/CommonIncludes/")
+if(CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+	# Keep the fetched dependency and desktop build intact. Its fatal allocator
+	# diagnostic must not call the desktop MessageBox API in an AppContainer.
+	set(DCON_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/uwp-includes")
+	file(COPY "${datacontainer_SOURCE_DIR}/CommonIncludes/" DESTINATION "${DCON_INCLUDE_DIR}")
+	file(READ "${DCON_INCLUDE_DIR}/common_types.hpp" DCON_COMMON_TYPES)
+	set(DCON_DESKTOP_ERROR "MessageBoxW(nullptr, L\"Unable to reserve memory\", L\"Fatal error\", MB_OK);")
+	string(FIND "${DCON_COMMON_TYPES}" "${DCON_DESKTOP_ERROR}" DCON_ERROR_POSITION)
+	if(DCON_ERROR_POSITION EQUAL -1)
+		message(FATAL_ERROR "DataContainer allocator diagnostic changed; review the UWP adaptation")
+	endif()
+	string(REPLACE "${DCON_DESKTOP_ERROR}" "OutputDebugStringW(L\"Fatal error: Unable to reserve memory\\n\");" DCON_COMMON_TYPES "${DCON_COMMON_TYPES}")
+	file(WRITE "${DCON_INCLUDE_DIR}/common_types.hpp" "${DCON_COMMON_TYPES}")
+endif()
+target_include_directories(dependency_DataContainer SYSTEM INTERFACE "${DCON_INCLUDE_DIR}")
 
 # CONTAINER GENERATOR
 file(GLOB_RECURSE DCONGENERATOR_SOURCE "${datacontainer_SOURCE_DIR}/DataContainerGenerator/*.cpp")
