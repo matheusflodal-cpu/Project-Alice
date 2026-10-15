@@ -1,117 +1,77 @@
-name: Build Project Alice UWP (Xbox)
+name: Project Alice UWP port diagnostics
 
 on:
   workflow_dispatch:
   push:
+  pull_request:
+
+permissions:
+  contents: read
 
 jobs:
-  build-uwp:
+  platform-probe:
+    name: UWP platform probe (not the game)
     runs-on: windows-2022
-
     steps:
-    - name: 1. Baixar o codigo e submodulos (dependencias)
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
+      - uses: actions/checkout@v4
+      - name: Verify UWP build tooling
+        shell: python
+        run: |
+          import os, shutil, subprocess, sys
+          os.environ['CMAKE_EXE'] = shutil.which('cmake') or 'cmake'
+          subprocess.run([sys.executable, 'tools/uwp/test_tooling.py'], check=True)
+      - name: Compile AppContainer probe and package unsigned MSIX
+        shell: python
+        run: |
+          import subprocess, sys
+          subprocess.run([sys.executable, 'tools/uwp/build_probe.py'], check=True)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: uwp-platform-probe-unsigned
+          path: |
+            build_uwp_probe/AliceUwpProbe.msix
+            build_uwp_probe/build.log
+          if-no-files-found: error
 
-    - name: 2. Configurar MSBuild e Visual Studio C++20
-      uses: microsoft/setup-msbuild@v2
-
-    - name: 3. Gerar projeto UWP via CMake (Unico)
-      shell: cmd
-      run: |
-        mkdir build_uwp
-        cd build_uwp
-        cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_SYSTEM_NAME="WindowsStore" -DCMAKE_SYSTEM_VERSION="10.0" -DCMAKE_CXX_STANDARD=20
-
-    - name: 3.5. Injetar camada de compatibilidade UWP e ajustar .vcxproj
-      shell: python
-      run: |
-        import os, glob, re
-
-        root = os.getcwd()
-        compat_path = os.path.join(root, "build_uwp", "uwp_compat.hpp")
-
-        compat_code = """#pragma once
-        #ifndef UWP_COMPAT_HPP
-        #define UWP_COMPAT_HPP
-        #ifndef NOMINMAX
-        #define NOMINMAX
-        #endif
-        #ifndef WIN32_LEAN_AND_MEAN
-        #define WIN32_LEAN_AND_MEAN
-        #endif
-        #include <winapifamily.h>
-        #undef WINAPI_FAMILY
-        #define WINAPI_FAMILY WINAPI_FAMILY_DESKTOP_APP
-        #include <windows.h>
-        #undef min
-        #undef max
-        static inline int UwpMessageBoxW(void* hWnd, const wchar_t* lpText, const wchar_t* lpCaption, unsigned int uType) {
-            (void)hWnd; (void)uType;
-            if (lpCaption) OutputDebugStringW(lpCaption);
-            if (lpText) OutputDebugStringW(lpText);
-            return 1;
-        }
-        static inline int UwpMessageBoxA(void* hWnd, const char* lpText, const char* lpCaption, unsigned int uType) {
-            (void)hWnd; (void)uType;
-            if (lpCaption) OutputDebugStringA(lpCaption);
-            if (lpText) OutputDebugStringA(lpText);
-            return 1;
-        }
-        #undef MessageBoxW
-        #undef MessageBoxA
-        #undef MessageBox
-        #define MessageBoxW UwpMessageBoxW
-        #define MessageBoxA UwpMessageBoxA
-        #define MessageBox UwpMessageBoxW
-        #endif
-        """
-
-        with open(compat_path, "w", encoding="utf-8") as f:
-            f.write(compat_code)
-
-        for target_file in glob.glob("build_uwp/**/cmake_pch.hxx", recursive=True) + glob.glob("build_uwp/**/common_types.hpp", recursive=True):
-            with open(target_file, "r", encoding="utf-8") as f:
-                tc = f.read()
-            with open(target_file, "w", encoding="utf-8") as f:
-                f.write(f'#include "{compat_path}"\n' + tc)
-
-        generators = ("ParserGenerator", "DCONGENERATOR", "DCONINTERFACEGEN", "DataContainer")
-
-        for filepath in glob.glob("build_uwp/**/*.vcxproj", recursive=True):
-            filename = os.path.basename(filepath)
-            with open(filepath, "r", encoding="utf-8") as f:
-                content = f.read()
-
-            content = content.replace("<RuntimeLibrary>MultiThreaded</RuntimeLibrary>", "<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>")
-            content = content.replace("<RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>", "<RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>")
-
-            if "libglew" in filename or "Alice" in filename:
-                content = content.replace("<WindowsAppContainer>true</WindowsAppContainer>", "<WindowsAppContainer>false</WindowsAppContainer>")
-                content = content.replace("<AppContainerApplication>true</AppContainerApplication>", "<AppContainerApplication>false</AppContainerApplication>")
-
-            if filename == "Alice.vcxproj":
-                content = content.replace("<ClCompile>", f"<ClCompile>\n      <ForcedIncludeFiles>{compat_path};%(ForcedIncludeFiles)</ForcedIncludeFiles>")
-
-            if any(g in filename for g in generators):
-                content = content.replace("<AppContainerApplication>true</AppContainerApplication>", "<AppContainerApplication>false</AppContainerApplication>")
-                content = content.replace("<WindowsAppContainer>true</WindowsAppContainer>", "<WindowsAppContainer>false</WindowsAppContainer>")
-                content = content.replace("<ApplicationType>Windows Store</ApplicationType>", "")
-                content = content.replace("<ApplicationTypeRevision>10.0</ApplicationTypeRevision>", "")
-                content = re.sub(r"<WindowsTargetPlatformMinVersion>.*?</WindowsTargetPlatformMinVersion>", "", content)
-                content = content.replace("windowsapp.lib;", "kernel32.lib;user32.lib;")
-
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write(content)
-
-    - name: 4. Compilar os Geradores e depois o Alice UWP (Mostrando apenas Erros)
-      shell: cmd
-      run: |
-        msbuild build_uwp/ParserGenerator/ParserGenerator.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
-        msbuild build_uwp/dependencies/DataContainerGenerator/DCONGENERATOR.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
-        msbuild build_uwp/FifInterfaceGenerator/DCONINTERFACEGEN.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
-        msbuild build_uwp/_deps/datacontainerlua-build/DataContainer-Lua.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
-        msbuild build_uwp/_deps/datacontaineroosreporter-build/DataContainer_OOS_Reporter/DataContainer_OOS_Reporter.vcxproj /p:Configuration=Release /p:Platform=x64 /m /clp:ErrorsOnly
-        set "PATH=%CD%\build_uwp\ParserGenerator\Release;%CD%\build_uwp\dependencies\DataContainerGenerator\Release;%CD%\build_uwp\FifInterfaceGenerator\Release;%CD%\build_uwp\_deps\datacontainerlua-build\Release;%CD%\build_uwp\_deps\datacontaineroosreporter-build\DataContainer_OOS_Reporter\Release;%PATH%"
-        cmake --build build_uwp --config Release --target Alice -- /m /clp:ErrorsOnly
+  engine-compatibility:
+    name: Strict UWP engine compile (port in progress)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Configure desktop host tools
+        shell: cmd
+        run: cmake -S . -B build_host -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=OFF -DALICE_HOST_TOOLS_ONLY=ON
+      - name: Build desktop generators
+        shell: cmd
+        run: cmake --build build_host --config Release --target ParserGenerator DCONGENERATOR DCONINTERFACEGEN DataContainer-Lua DataContainer_OOS_Reporter -- /m /bl:host-generators.binlog
+      - name: Collect desktop executables
+        shell: python
+        run: |
+          import subprocess, sys
+          subprocess.run([sys.executable, 'tools/uwp/collect_host_tools.py', 'build_host', 'host-tools'], check=True)
+      - name: Configure strict UWP engine
+        shell: cmd
+        run: cmake -S . -B build_uwp -G "Visual Studio 17 2022" -A x64 -DCMAKE_SYSTEM_NAME=WindowsStore -DCMAKE_SYSTEM_VERSION=10.0 -DCMAKE_CXX_STANDARD=20 -DBUILD_TESTING=OFF -DALICE_HOST_TOOLS_DIR="%CD%/host-tools"
+      - name: Select UWP dynamic runtime
+        shell: python
+        run: |
+          import subprocess, sys
+          subprocess.run([sys.executable, 'tools/uwp/prepare.py', 'build_uwp'], check=True)
+      - name: Compile with real UWP restrictions
+        shell: cmd
+        run: cmake --build build_uwp --config Release --target Alice -- /m /bl:uwp-engine.binlog /fl /flp:logfile=uwp-engine.log;verbosity=normal
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: uwp-build-diagnostics
+          path: |
+            *.binlog
+            uwp-engine.log
+            build_host/*.binlog
+            build_uwp/*.binlog
+            build_uwp/uwp-engine.log
+            build_uwp/CMakeFiles/CMakeConfigureLog.yaml
+            build_host/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: warn

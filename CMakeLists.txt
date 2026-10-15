@@ -18,6 +18,20 @@ include(CTest)
 
 add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
 
+option(ALICE_HOST_TOOLS_ONLY "Build only native code generators" OFF)
+if(ALICE_HOST_TOOLS_ONLY)
+	if(CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+		message(FATAL_ERROR "Host generators must be configured as desktop executables")
+	endif()
+	include(FetchContent)
+	add_subdirectory(dependencies/DataContainerGenerator)
+	add_subdirectory(dependencies/DataContainerLuaGenerator)
+	add_subdirectory(dependencies/DataContainerOOSReporter)
+	add_subdirectory(ParserGenerator)
+	add_subdirectory(FifInterfaceGenerator)
+	return()
+endif()
+
 if(WIN32)
 	string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG ${CMAKE_CXX_FLAGS_DEBUG})
 	string(REPLACE "/RTC1" "" CMAKE_C_FLAGS_DEBUG ${CMAKE_C_FLAGS_DEBUG})
@@ -577,36 +591,38 @@ endforeach()
 
 
 
+include(cmake/HostGenerators.cmake)
+
 # GENERATE CONTAINER
 set(CONTAINER_PATH ${PROJECT_SOURCE_DIR}/src/gamestate/dcon_generated)
 
 # The command to build the generated file
 add_custom_command(
 	OUTPUT ${CONTAINER_PATH}.hpp ${CONTAINER_PATH}_ids.hpp
-	COMMAND DCONGENERATOR ${CONTAINER_PATH}.txt
-	DEPENDS ${CONTAINER_PATH}.txt
+	COMMAND ${ALICE_TOOL_DCONGENERATOR} ${CONTAINER_PATH}.txt
+	DEPENDS ${CONTAINER_PATH}.txt ${ALICE_TOOL_DCONGENERATOR}
 	VERBATIM)
 
 add_custom_command(
 	OUTPUT ${PROJECT_SOURCE_DIR}/src/gamestate/fif_dcon_generated.hpp
-	COMMAND DCONINTERFACEGEN ${CONTAINER_PATH}.txt
+	COMMAND ${ALICE_TOOL_DCONINTERFACEGEN} ${CONTAINER_PATH}.txt
 	DEPENDS ${CONTAINER_PATH}.txt
-	DEPENDS DCONINTERFACEGEN
+	DEPENDS ${ALICE_TOOL_DCONINTERFACEGEN}
 	VERBATIM)
 
 add_custom_command(
 	OUTPUT ${PROJECT_SOURCE_DIR}/src/gamestate/lua_dcon_generated.hpp
-	COMMAND DataContainer-Lua alice alice_state_ptr->world. ${CONTAINER_PATH}.txt ${PROJECT_SOURCE_DIR}/src/gamestate/lua_dcon_generated.cpp ${PROJECT_SOURCE_DIR}/src/gamestate/lua_dcon_generated.hpp ${PROJECT_SOURCE_DIR}/assets/lua/engine
+	COMMAND ${ALICE_TOOL_DataContainer-Lua} alice alice_state_ptr->world. ${CONTAINER_PATH}.txt ${PROJECT_SOURCE_DIR}/src/gamestate/lua_dcon_generated.cpp ${PROJECT_SOURCE_DIR}/src/gamestate/lua_dcon_generated.hpp ${PROJECT_SOURCE_DIR}/assets/lua/engine
 	DEPENDS ${CONTAINER_PATH}.txt
-	DEPENDS DataContainer-Lua
+	DEPENDS ${ALICE_TOOL_DataContainer-Lua}
 	VERBATIM
 )
 
 add_custom_command(
 	OUTPUT ${PROJECT_SOURCE_DIR}/src/gamestate/dcon_oos_reporter_generated.hpp ${PROJECT_SOURCE_DIR}/src/gamestate/dcon_oos_reporter_generated.cpp
-	COMMAND DataContainer_OOS_Reporter alice ${CONTAINER_PATH}.txt dcon_oos_reporter_generated.cpp dcon_oos_reporter_generated.hpp ${PROJECT_SOURCE_DIR}/src/gamestate/
+	COMMAND ${ALICE_TOOL_DataContainer_OOS_Reporter} alice ${CONTAINER_PATH}.txt dcon_oos_reporter_generated.cpp dcon_oos_reporter_generated.hpp ${PROJECT_SOURCE_DIR}/src/gamestate/
 	DEPENDS ${CONTAINER_PATH}.txt
-	DEPENDS DataContainer_OOS_Reporter
+	DEPENDS ${ALICE_TOOL_DataContainer_OOS_Reporter}
 	VERBATIM
 )
 
@@ -620,7 +636,7 @@ add_custom_target(GENERATE_CONTAINER_OOS DEPENDS ${PROJECT_SOURCE_DIR}/src/games
 
 
 foreach( AliceTarget ${AllAliceTargets} )
-	add_dependencies(${AliceTarget} GENERATE_CONTAINER ParserGenerator)
+	add_dependencies(${AliceTarget} GENERATE_CONTAINER ${ALICE_TOOL_ParserGenerator})
 	add_dependencies(${AliceTarget} GENERATE_CONTAINERIFACE)
 	add_dependencies(${AliceTarget} GENERATE_CONTAINER_LUA)
 	add_dependencies(${AliceTarget} GENERATE_CONTAINER_OOS)
@@ -629,56 +645,56 @@ endforeach()
 # The command to build the generated parsers file
 add_custom_command(
 	OUTPUT ${PROJECT_SOURCE_DIR}/src/parsing/parser_defs_generated.hpp
-	COMMAND ParserGenerator ${PROJECT_SOURCE_DIR}/src/parsing/parser_defs.txt
-	DEPENDS ${PROJECT_SOURCE_DIR}/src/parsing/parser_defs.txt
+	COMMAND ${ALICE_TOOL_ParserGenerator} ${PROJECT_SOURCE_DIR}/src/parsing/parser_defs.txt
+	DEPENDS ${PROJECT_SOURCE_DIR}/src/parsing/parser_defs.txt ${ALICE_TOOL_ParserGenerator}
 	VERBATIM)
 
 add_custom_command(
 	OUTPUT ${PROJECT_SOURCE_DIR}/src/parsing/tutorial_parser_defs_generated.hpp
-	COMMAND ParserGenerator ${PROJECT_SOURCE_DIR}/src/parsing/tutorial_parser_defs.txt
-	DEPENDS ${PROJECT_SOURCE_DIR}/src/parsing/tutorial_parser_defs.txt
+	COMMAND ${ALICE_TOOL_ParserGenerator} ${PROJECT_SOURCE_DIR}/src/parsing/tutorial_parser_defs.txt
+	DEPENDS ${PROJECT_SOURCE_DIR}/src/parsing/tutorial_parser_defs.txt ${ALICE_TOOL_ParserGenerator}
 	VERBATIM)
 
 add_custom_command(
 	OUTPUT ${PROJECT_SOURCE_DIR}/src/parsing/gui_parser_defs_generated.hpp
-	COMMAND ParserGenerator ${PROJECT_SOURCE_DIR}/src/parsing/gui_parser_defs.txt
-	DEPENDS ${PROJECT_SOURCE_DIR}/src/parsing/gui_parser_defs.txt
+	COMMAND ${ALICE_TOOL_ParserGenerator} ${PROJECT_SOURCE_DIR}/src/parsing/gui_parser_defs.txt
+	DEPENDS ${PROJECT_SOURCE_DIR}/src/parsing/gui_parser_defs.txt ${ALICE_TOOL_ParserGenerator}
 	VERBATIM)
 
 add_custom_command(
 	OUTPUT ${PROJECT_SOURCE_DIR}/src/parsing/save_parser_defs_generated.hpp
-	COMMAND ParserGenerator ${PROJECT_SOURCE_DIR}/src/parsing/save_parser_defs.txt
-	DEPENDS ${PROJECT_SOURCE_DIR}/src/parsing/save_parser_defs.txt
+	COMMAND ${ALICE_TOOL_ParserGenerator} ${PROJECT_SOURCE_DIR}/src/parsing/save_parser_defs.txt
+	DEPENDS ${PROJECT_SOURCE_DIR}/src/parsing/save_parser_defs.txt ${ALICE_TOOL_ParserGenerator}
 	VERBATIM)
 
 add_custom_command(
 	OUTPUT ${PROJECT_SOURCE_DIR}/src/parsing/news_parser_defs_generated.hpp
-	COMMAND ParserGenerator ${PROJECT_SOURCE_DIR}/src/parsing/news_parser_defs.txt
-	DEPENDS ${PROJECT_SOURCE_DIR}/src/parsing/news_parser_defs.txt
+	COMMAND ${ALICE_TOOL_ParserGenerator} ${PROJECT_SOURCE_DIR}/src/parsing/news_parser_defs.txt
+	DEPENDS ${PROJECT_SOURCE_DIR}/src/parsing/news_parser_defs.txt ${ALICE_TOOL_ParserGenerator}
 	VERBATIM)
 
 add_custom_command(
 	OUTPUT ${PROJECT_SOURCE_DIR}/src/parsing/effect_parser_defs_generated.hpp
-	COMMAND ParserGenerator ${PROJECT_SOURCE_DIR}/src/parsing/effect_parser_defs.txt
-	DEPENDS ${PROJECT_SOURCE_DIR}/src/parsing/effect_parser_defs.txt
+	COMMAND ${ALICE_TOOL_ParserGenerator} ${PROJECT_SOURCE_DIR}/src/parsing/effect_parser_defs.txt
+	DEPENDS ${PROJECT_SOURCE_DIR}/src/parsing/effect_parser_defs.txt ${ALICE_TOOL_ParserGenerator}
 	VERBATIM)
 
 add_custom_command(
 	OUTPUT ${PROJECT_SOURCE_DIR}/src/parsing/trigger_parser_defs_generated.hpp
-	COMMAND ParserGenerator ${PROJECT_SOURCE_DIR}/src/parsing/trigger_parser_defs.txt
-	DEPENDS ${PROJECT_SOURCE_DIR}/src/parsing/trigger_parser_defs.txt
+	COMMAND ${ALICE_TOOL_ParserGenerator} ${PROJECT_SOURCE_DIR}/src/parsing/trigger_parser_defs.txt
+	DEPENDS ${PROJECT_SOURCE_DIR}/src/parsing/trigger_parser_defs.txt ${ALICE_TOOL_ParserGenerator}
 	VERBATIM)
 
 add_custom_command(
   OUTPUT ${PROJECT_SOURCE_DIR}/src/text/font_defs_generated.hpp
-  COMMAND ParserGenerator ${PROJECT_SOURCE_DIR}/src/text/font_defs.txt
-  DEPENDS ${PROJECT_SOURCE_DIR}/src/text/font_defs.txt
+  COMMAND ${ALICE_TOOL_ParserGenerator} ${PROJECT_SOURCE_DIR}/src/text/font_defs.txt
+  DEPENDS ${PROJECT_SOURCE_DIR}/src/text/font_defs.txt ${ALICE_TOOL_ParserGenerator}
   VERBATIM)
 
 add_custom_command(
   OUTPUT ${PROJECT_SOURCE_DIR}/src/text/bmfont_defs_generated.hpp
-  COMMAND ParserGenerator ${PROJECT_SOURCE_DIR}/src/text/bmfont_defs.txt
-  DEPENDS ${PROJECT_SOURCE_DIR}/src/text/bmfont_defs.txt
+  COMMAND ${ALICE_TOOL_ParserGenerator} ${PROJECT_SOURCE_DIR}/src/text/bmfont_defs.txt
+  DEPENDS ${PROJECT_SOURCE_DIR}/src/text/bmfont_defs.txt ${ALICE_TOOL_ParserGenerator}
   VERBATIM)
 
 # Sets a dependency on the generated file
@@ -710,7 +726,7 @@ if(WIN32)
 endif()
 add_subdirectory(Launcher)
 
-add_dependencies(launch_alice GENERATE_CONTAINER ParserGenerator)
+add_dependencies(launch_alice GENERATE_CONTAINER ${ALICE_TOOL_ParserGenerator})
 add_dependencies(launch_alice GENERATE_CONTAINERIFACE)
 add_dependencies(launch_alice GENERATE_CONTAINER_LUA)
 add_dependencies(launch_alice GENERATE_CONTAINER_OOS)
