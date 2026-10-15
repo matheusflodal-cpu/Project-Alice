@@ -57,7 +57,9 @@ class PreparationTests(unittest.TestCase):
                                       capture_output=True, text=True)
             self.assertEqual(complete.returncode, 0, complete.stdout + complete.stderr)
             selected = (source / 'build/selected.txt').read_text()
-            self.assertEqual(Path(selected), host / 'ParserGenerator.exe')
+            # Hosted runners can expose TEMP through an 8.3 path alias while
+            # CMake expands it. Compare file identity rather than path spelling.
+            self.assertTrue(Path(selected).samefile(host / 'ParserGenerator.exe'))
 
 
 if __name__ == '__main__':
